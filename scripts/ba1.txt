@@ -1,0 +1,125 @@
+CL SCR
+
+-- Set pagesize and linesize
+SET LINESIZE 120
+SET PAGESIZE 26
+
+-- Format
+COLUMN Day 		FORMAT A13 		HEADING "DAY"
+COLUMN Meal_Type 	FORMAT A15 		HEADING "MEAL TYPE"
+COLUMN day_of_week 	FORMAT '9' 			HEADING " "
+COLUMN TotalOrders2022 	FORMAT '99,999' 		HEADING "2022    | TOTAL ORDERS"
+COLUMN TotalOrders2023 	FORMAT '99,999' 		HEADING "2023    | TOTAL ORDERS"
+COLUMN TotalOrders2024 	FORMAT '99,999' 		HEADING "2024    | TOTAL ORDERS"
+COLUMN AvgSalesPerc 	FORMAT '99' 			HEADING "AVERAGE    | SALES GROWTH %"
+COLUMN AvgOrdersPerc 	FORMAT '99' 			HEADING "AVERAGE    | ORDERS GROWTH %"
+COLUMN PredictOrders 	FORMAT '99,999' 		HEADING "2025     | Predicted Orders"
+COLUMN OrderDiff 		FORMAT '9,999' 		HEADING "ORDERS  | DIFFERENCE"
+BREAK ON day SKIP 1 ON day_of_week
+
+-- Title
+TTITLE 	CENTER 'Daily Orders by Meal Period Between The Year 2022 To 2024' - 
+	SKIP 1 - 
+	RIGHT 'Date: ' _DATE -
+	SKIP 1 - 
+	RIGHT 'Page No: ' FORMAT 999 SQL.PNO -
+	SKIP 2 -
+
+COMPUTE SUM LABEL 'GRAND TOTAL: ' 	OF TotalOrders2022 	ON Day
+COMPUTE SUM 					OF TotalOrders2023 	ON Day
+COMPUTE SUM 					OF TotalOrders2024 	ON Day
+
+CREATE OR REPLACE VIEW MealTypeView AS
+SELECT 	
+ODF.date_key, 
+	ODF.orderid, 
+	D.day_of_week, 
+	D.cal_year,
+	CASE 
+		WHEN D.day_of_week = 1 THEN 'Monday' 
+		WHEN D.day_of_week = 2 THEN 'Tuesday' 
+		WHEN D.day_of_week = 3 THEN 'Wednesday' 
+		WHEN D.day_of_week = 4 THEN 'Thursday' 
+		WHEN D.day_of_week = 5 THEN 'Friday' 
+		WHEN D.day_of_week = 6 THEN 'Saturday' 
+		WHEN D.day_of_week = 7 THEN 'Sunday' 
+	END AS Day,  
+	CASE
+		WHEN ODF.ordertime BETWEEN '09:00' AND '11:00' THEN '1)Breakfast'
+		WHEN ODF.ordertime BETWEEN '11:01' AND '12:00' THEN '2)Morning Tea'
+		WHEN ODF.ordertime BETWEEN '12:01' AND '15:00' THEN '3)Lunch'
+		WHEN ODF.ordertime BETWEEN '15:01' AND '18:00' THEN '4)Afternoon Tea'
+		WHEN ODF.ordertime BETWEEN '18:01' AND '21:00' THEN '5)Dinner'
+		WHEN ODF.ordertime BETWEEN '21:01' AND '22:00' THEN '6)Supper'
+	END AS Meal_Type 
+FROM orders_fact 	ODF 
+JOIN items_fact 	ITF 	ON ODF.orderid = ITF.orderid
+JOIN date_dim 	D 	ON ODF.date_key = D.date_key
+WHERE D.cal_year BETWEEN 2022 AND 2024;
+
+
+CREATE OR REPLACE VIEW Orders2022 AS
+SELECT 
+cal_year, 
+day_of_week, 
+Day, 
+Meal_Type, 
+COUNT(DISTINCT(orderid)) AS TotalOrders2022
+FROM MealTypeView
+WHERE cal_year = 2022
+GROUP BY cal_year, day_of_week, Day, Meal_Type;
+
+CREATE OR REPLACE VIEW Orders2023 AS
+SELECT 
+cal_year, 
+day_of_week, 
+Day, 
+Meal_Type, 
+COUNT(DISTINCT(orderid)) AS TotalOrders2023
+FROM MealTypeView
+WHERE cal_year = 2023
+GROUP BY cal_year, day_of_week, Day, Meal_Type;
+
+CREATE OR REPLACE VIEW Orders2024 AS
+SELECT 
+cal_year, 
+day_of_week, 
+Day, 
+Meal_Type, 
+COUNT(DISTINCT(orderid)) AS TotalOrders2024
+FROM MealTypeView
+WHERE cal_year = 2024
+GROUP BY cal_year, day_of_week, Day, Meal_Type;
+
+CREATE OR REPLACE VIEW CompareView AS
+SELECT 	
+O1.day_of_week, 
+	O1.Day, 
+	O1.Meal_Type, 
+	TotalOrders2022, 
+	TotalOrders2023, 
+	TotalOrders2024, 
+	((TotalOrders2023 - TotalOrders2022) + (TotalOrders2024 - TotalOrders2023)) / 2 AS AvgOrdersDifference, 
+	(((TotalOrders2023 - TotalOrders2022) / TotalOrders2022 * 100) + ((TotalOrders2024 - TotalOrders2023) / TotalOrders2023 * 100)) / 2 AS AvgOrdersPerc
+FROM 	Orders2022 O1
+JOIN 		Orders2023 O2 	ON O1.Day = O2.Day AND O1.Meal_Type = O2.Meal_Type
+JOIN 		Orders2024 O3 	ON O1.Day = O3.Day AND O1.Meal_Type = O3.Meal_Type;
+
+
+
+SELECT 	
+Day, 
+	Meal_Type, 
+	TotalOrders2022,
+	TotalOrders2023, 
+	TotalOrders2024, 
+	AvgOrdersPerc, 
+	((TotalOrders2024 * AvgOrdersPerc / 100) + TotalOrders2024) AS PredictOrders,
+	((TotalOrders2024 * AvgOrdersPerc / 100) + TotalOrders2024) - TotalOrders2024 AS OrderDiff
+FROM CompareView
+ORDER BY day_of_week, Meal_Type;
+
+CLEAR COLUMNS
+CLEAR BREAKS
+CLEAR COMPUTES
+TTITLE OFF

@@ -1,0 +1,163 @@
+drop sequence date_seq;
+
+create sequence date_seq
+  start with 100001
+  increment by 1;
+
+set serveroutput on
+declare
+ startDate  date:=to_date('01/01/2015','dd/mm/yyyy');
+ endDate    date:=to_date('31/12/2024','dd/mm/yyyy');
+ V_DATE_KEY               NUMBER;
+ V_CAL_DATE               DATE;
+ V_DAY_OF_WEEK            NUMBER(1);
+ V_DAY_NUM_MONTH          NUMBER(2);
+ V_CAL_MONTH_YEAR         NUMBER(2);
+ V_CAL_YEAR_MONTH         CHAR(7);
+ V_CAL_QUARTER            CHAR(2);
+ V_CAL_YEAR               NUMBER(4);
+ V_HOLIDAY_IND            CHAR(1);
+ V_WEEKDAY_IND            CHAR(1);
+ V_FESTIVE_SEASON         VARCHAR(30);
+
+begin
+  while (startDate<=endDate) loop
+   V_CAL_DATE := startDate;
+   V_DAY_OF_WEEK:=to_char(startDate,'D');
+   V_DAY_NUM_MONTH:=to_char(startDate,'DD');
+   V_CAL_MONTH_YEAR:=to_char(startDate,'MM');
+   V_CAL_YEAR:=to_char(startDate,'YYYY');
+   V_CAL_YEAR_MONTH:=V_CAL_YEAR||'-'||V_CAL_MONTH_YEAR;
+   V_CAL_QUARTER:='Q'||to_char(startDate,'Q');
+   V_HOLIDAY_IND:='N';
+
+   if (V_DAY_OF_WEEK between 2 and 6) then
+     V_WEEKDAY_IND:='Y';
+   else
+     V_WEEKDAY_IND:='N';
+   end if;
+
+   V_FESTIVE_SEASON := NULL;
+   if startDate = to_date('01/01/' || V_CAL_YEAR, 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'New Year';
+   elsif startDate = to_date('01/05/' || V_CAL_YEAR, 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Labour Day';
+   elsif startDate = to_date('31/08/' || V_CAL_YEAR, 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Merdeka Day';
+   elsif startDate = to_date('25/12/' || V_CAL_YEAR, 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Christmas';
+
+   -- Additional Malaysian public holidays (dates may vary annually)
+   elsif startDate = to_date('29/07/2015', 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Hari Raya Puasa';
+   elsif startDate = to_date('24/09/2015', 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Hari Raya Haji';
+   elsif startDate = to_date('18/02/2015', 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Chinese New Year';
+   elsif startDate = to_date('14/04/2015', 'dd/mm/yyyy') then
+      V_FESTIVE_SEASON := 'Deepavali';
+   end if;
+    
+   insert into date_dim values(
+   date_seq.nextval,
+   V_CAL_DATE,
+   V_DAY_OF_WEEK,
+   V_DAY_NUM_MONTH,
+   V_CAL_MONTH_YEAR,
+   V_CAL_YEAR_MONTH,
+   V_CAL_QUARTER,
+   V_CAL_YEAR,
+   V_HOLIDAY_IND,
+   V_WEEKDAY_IND,
+   V_FESTIVE_SEASON);
+
+   startDate:=startDate+1;
+  end loop;
+end;
+/
+
+drop sequence customer_dim_seq;
+
+create sequence customer_dim_seq
+start with 100001
+increment by 1;
+
+insert into customer_dim
+select customer_dim_seq.nextval,
+	 CUSTOMERID,
+ 	 UPPER(customerName),
+	 dob,
+       monthlyIncome,
+ 	 UPPER(state),
+	 UPPER(city),
+	 postalCode, 
+      '01/01/2015',
+       '31/12/9999',
+       1
+from new_cust;
+
+drop sequence menu_dim_seq;
+
+create sequence menu_dim_seq
+   start with 1001;
+
+insert into menu_dim
+select menu_dim_seq.nextval,
+       A.menuID,
+       UPPER(A.itemName),
+       UPPER(A.category),
+       UPPER(B.stallName)
+from menu        A 
+join hawkerStall B on A.stallID = B.stallID;
+
+INSERT INTO Items_Fact
+SELECT 
+    C.date_key, 
+    D.customer_key, 
+    E.menu_key, 
+    A.orderID,
+    B.price AS unitPrice, 
+    B.quantity,
+    (B.price * B.quantity) AS lineTotal
+FROM new_orders          A 
+JOIN new_order_details   B ON A.orderID = B.orderID
+JOIN date_dim            C ON TRUNC(A.orderDate) = TRUNC(C.cal_date)
+JOIN customer_dim        D ON A.customerID = D.customerID
+JOIN menu_dim            E ON B.menuID = E.menuID
+JOIN delivery            F ON A.deliveryID = F.deliveryID
+JOIN company             G ON F.companyID = G.companyID;
+
+INSERT INTO Orders_Fact
+SELECT
+    B.date_key, 
+    C.customer_key,  
+    A.orderID,
+    A.deliveryFee,
+    UPPER(E.companyName), 
+    UPPER(A.status), 
+    TO_CHAR(A.orderDate, 'HH24:MI') AS orderTime,
+    0.00
+FROM new_orders          A 
+JOIN date_dim            B ON TRUNC(A.orderDate) = TRUNC(B.cal_date)
+JOIN customer_dim        C ON A.customerID = C.customerID
+JOIN delivery            D ON A.deliveryID = D.deliveryID
+JOIN company             E ON D.companyID = E.companyID;
+
+–- this table is created to minimise the loadwork when calculating the sum from items_fact
+-- straight to updating the orders_fact table. Instead we insert into a temp_table first then 
+-- only update
+
+create table temp_table(
+orderID number           not null,
+orderAmount number(12,2) not null
+);
+
+insert into temp_table
+select orderID, SUM(lineTotal) orderAmount
+from items_fact
+group by orderID;
+
+update orders_fact A
+set orderAmount = (select orderAmount 
+                   from temp_table 
+                   where orderID = A.orderID);

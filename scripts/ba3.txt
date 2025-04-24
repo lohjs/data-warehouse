@@ -1,0 +1,126 @@
+CL SCR
+
+-- Set pagesize and linesize
+SET LINESIZE 120
+SET PAGESIZE 26
+
+SELECT DISTINCT(stallname)
+FROM menu_dim;
+
+ACCEPT v_stall CHAR PROMPT 'Enter the Stall For Prediction : ' 
+
+-- Format
+COLUMN stallname 			FORMAT A25 		HEADING "STALL NAME"
+COLUMN IncomeLevel 		FORMAT A20 		HEADING "      CUSTOMER |    INCOME LEVEL"
+COLUMN TYearSales 	 	FORMAT '$9,999,999.99' 	HEADING "TOTAL   | SALES   "
+COLUMN TYearOrders 	 	FORMAT '99,999' 		HEADING "TOTAL| ORDERS"
+COLUMN AverageSales 	 	FORMAT '$9,999,999.99' 	HEADING "AVERAGE   |SALES PER YEAR"
+COLUMN AverageOrders 	 	FORMAT '99,999' 		HEADING "AVERAGE   |ORDERS PER YEAR"
+COLUMN AverageSalesPerOrder 	FORMAT '$99,999.99' 	HEADING "AVERAGE    | SALES PER ORDER"
+BREAK ON stallname SKIP 1
+
+-- Title
+TTITLE 	CENTER 'Stall Sales Performance Based On Customer Income Level Between 2022 And 2024' - 
+	SKIP 1 - 
+	RIGHT 'Date: ' _DATE -
+	SKIP 1 - 
+	RIGHT 'Page No: ' FORMAT 999 SQL.PNO -
+	SKIP 2 -
+
+COMPUTE SUM LABEL 'GRAND TOTAL: ' 	OF TYearSales 		ON stallname
+COMPUTE SUM 					OF TYearOrders 		ON stallname
+
+
+CREATE OR REPLACE VIEW IncomeLevelView AS
+SELECT 
+customer_key,  
+    	CASE 
+        		WHEN MonthlyIncome = '2500 and below' OR MonthlyIncome = '2501 - 4000' THEN '3)LOW INCOME'
+        		WHEN MonthlyIncome = '4001 - 5500' OR MonthlyIncome = '5501 - 7000' THEN '2)MODERATE INCOME'
+        		ELSE '1)HIGH INCOME'
+    	END AS IncomeLevel 
+FROM customer_dim;	
+
+
+CREATE OR REPLACE VIEW ThreeYearSales AS
+SELECT 
+M.stallname, 
+ILV.IncomeLevel, 
+SUM(ITF.linetotal) AS TYearSales
+FROM orders_fact 		ODF
+JOIN items_fact 		ITF 	ON ODF.orderid = ITF.orderid
+JOIN date_dim 		D 	ON ODF.date_key = D.date_key
+JOIN IncomeLevelView 	ILV 	ON ODF.customer_key = ILV.customer_key
+JOIN menu_dim 		M 	ON M.menu_key = ITF.menu_key
+WHERE D.cal_year BETWEEN 2022 AND 2024
+GROUP BY M.stallname, ILV.IncomeLevel;
+
+CREATE OR REPLACE VIEW ThreeYearOrders AS
+SELECT 
+M.stallname, 
+ILV.IncomeLevel, 
+COUNT(DISTINCT(ODF.orderid)) AS TYearOrders
+FROM orders_fact 		ODF
+JOIN items_fact 		ITF 	ON ODF.orderid = ITF.orderid
+JOIN date_dim 		D 	ON ODF.date_key = D.date_key
+JOIN IncomeLevelView 	ILV 	ON ODF.customer_key = ILV.customer_key
+JOIN menu_dim 		M 	ON M.menu_key = ITF.menu_key
+WHERE D.cal_year BETWEEN 2022 AND 2024
+GROUP BY M.stallname, ILV.IncomeLevel;
+
+CREATE OR REPLACE VIEW AverageSalesView AS
+SELECT 
+M.stallname, 
+ILV.IncomeLevel, 
+(SUM(ITF.linetotal) / 3) AS AverageSales
+FROM orders_fact 		ODF
+JOIN items_fact 		ITF 	ON ODF.orderid = ITF.orderid
+JOIN date_dim 		D 	ON ODF.date_key = D.date_key
+JOIN IncomeLevelView 	ILV 	ON ODF.customer_key = ILV.customer_key
+JOIN menu_dim 		M 	ON M.menu_key = ITF.menu_key
+WHERE D.cal_year BETWEEN 2022 AND 2024
+GROUP BY M.stallname, ILV.IncomeLevel;
+
+CREATE OR REPLACE VIEW AverageOrdersView AS
+SELECT 
+M.stallname, 
+ILV.IncomeLevel, 
+(COUNT(DISTINCT(ODF.orderid)) / 3) AS AverageOrders
+FROM orders_fact 		ODF
+JOIN items_fact 		ITF 	ON ODF.orderid = ITF.orderid
+JOIN date_dim 		D 	ON ODF.date_key = D.date_key
+JOIN IncomeLevelView 	ILV 	ON ODF.customer_key = ILV.customer_key
+JOIN menu_dim 		M 	ON M.menu_key = ITF.menu_key
+WHERE D.cal_year BETWEEN 2022 AND 2024
+GROUP BY M.stallname, ILV.IncomeLevel;
+
+
+CREATE OR REPLACE VIEW CompareView AS
+SELECT 
+	TYS.stallname, 
+	TYS.IncomeLevel, 
+	TYS.TYearSales, 
+	ASV.AverageSales, 
+	TYO.TYearOrders,
+	AOV.AverageOrders
+FROM ThreeYearSales 	TYS
+JOIN AverageSalesView 	ASV 	ON TYS.stallname = ASV.stallname AND TYS.IncomeLevel = ASV.IncomeLevel
+JOIN ThreeYearOrders 	TYO 	ON TYS.stallname = TYO.stallname AND TYS.IncomeLevel = TYO.IncomeLevel
+JOIN AverageOrdersView 	AOV 	ON TYS.stallname = AOV.stallname AND TYS.IncomeLevel = AOV.IncomeLevel;
+
+SELECT 	
+stallname, 
+	IncomeLevel,  
+	TYearSales, 
+	TYearOrders,  
+	AverageSales, 
+	AverageOrders, 
+	(AverageSales / AverageOrders) AS AverageSalesPerOrder 
+FROM CompareView CV
+WHERE stallname = UPPER('&v_stall')
+ORDER BY stallname, IncomeLevel;
+
+CLEAR COLUMNS
+CLEAR BREAKS
+CLEAR COMPUTES
+TTITLE OFF

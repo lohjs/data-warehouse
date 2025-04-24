@@ -1,0 +1,120 @@
+drop procedure prod_new_customer;
+create or replace procedure prod_new_customer is
+begin
+    insert into customer_dim
+    select customer_dim_seq.nextval,
+           customerID,
+           UPPER(customerName),
+           dob,
+           monthlyIncome,
+ 	   UPPER(state),
+	   UPPER(city),
+	   postalCode, 
+           '01/01/2015',
+           '31/12/9999',
+           1
+     from new_cust
+     where customerID not in (
+         select customerID from customer_dim
+     );
+end;
+/
+
+EXEC prod_new_customer
+
+drop procedure prod_new_menu_item;
+create or replace procedure prod_new_menu_item is
+begin
+    insert into menu_dim
+    select menu_dim_seq.nextval,
+           A.menuID,
+           UPPER(A.itemName),
+           UPPER(A.category),
+           UPPER(B.stallName)
+     from menu         A
+     join hawkerStall  B on A.stallID = B.stallID
+     where menuID not in (
+         select menuID from menu_dim
+     );
+end;
+/
+
+EXEC prod_new_menu_item
+
+drop procedure prod_new_items_fact;
+
+create or replace procedure prod_new_items_fact is
+begin
+    insert into Items_Fact
+    select C.date_key, 
+           D.customer_key, 
+           E.menu_key, 
+           A.orderID,
+           B.price AS unitPrice, 
+           B.quantity,
+           (B.price * B.quantity) AS lineTotal
+    from new_orders         A
+    join new_order_details  B ON A.orderID = B.orderID
+    join date_dim           C ON TRUNC(A.orderDate) = TRUNC(C.cal_date)
+    join customer_dim       D ON A.customerID = D.customerID
+    join menu_dim           E ON B.menuID = E.menuID
+    left join Items_Fact IF ON IF.date_key = C.date_key 
+    and IF.customer_key = D.customer_key 
+    and IF.menu_key = E.menu_key 
+    and IF.orderID = A.orderID
+    where IF.date_key is null;
+end;
+/
+
+EXEC prod_new_items_fact
+
+drop procedure prod_load_temp_table;
+drop procedure prod_load_orders_fact;
+
+create or replace procedure prod_load_temp_table is
+begin
+    delete temp_table;
+
+    insert into temp_table (orderID, orderAmount)
+    select orderID, 
+           SUM(lineTotal) AS orderAmount
+    from items_fact
+    group by orderID;   
+end;
+/
+
+EXEC prod_load_temp_table
+
+create or replace procedure prod_load_orders_fact is
+begin
+    insert into Orders_Fact
+    select B.date_key, 
+           C.customer_key,  
+            A.orderID,
+            A.deliveryFee,
+            UPPER(E.companyName), 
+            UPPER(A.status), 
+            TO_CHAR(A.orderDate, 'HH24:MI') AS orderTime,
+            0.00
+    from new_orders     A
+    join date_dim       B ON TRUNC(A.orderDate) = TRUNC(B.cal_date)
+    join customer_dim   C ON A.customerID = C.customerID
+    join delivery       D ON A.deliveryID = D.deliveryID
+    join company        E ON D.companyID = E.companyID
+    where not exists (
+        select 1
+        from Orders_Fact F
+        where F.date_key = B.date_key
+        and F.customer_key = C.customer_key
+        and F.orderID = A.orderID
+    );
+    
+    update Orders_Fact G
+    set orderAmount = (select orderAmount
+                       from temp_table H
+                       where G.orderID = H.orderID);   
+end;
+/
+
+EXEC prod_load_orders_fact
+

@@ -1,0 +1,97 @@
+CL SCR
+
+-- Set pagesize and linesize
+SET LINESIZE 125
+SET PAGESIZE 26
+
+SELECT DISTINCT(stallname)
+FROM menu_dim;
+
+ACCEPT v_stall CHAR PROMPT 'Enter the Stall For Prediction : ' 
+
+-- Format
+COLUMN stallname 			FORMAT A25 		HEADING "STALL NAME"
+COLUMN cal_year 			FORMAT '9999' 		HEADING "YEAR"
+COLUMN YearlyTotalSales 		FORMAT '$99,999,999.99' 	HEADING "TOTAL    | SALES    "
+COLUMN YearlyTotalOrder 		FORMAT '99,999' 		HEADING " TOTAL | ORDERS "
+COLUMN SalesGrowthPerc 	 	FORMAT '9999.9' 		HEADING "SALES  | GROWTH %"
+COLUMN OrderGrowthPerc 		FORMAT '9999.9' 		HEADING "ORDERS | GROWTH %"
+COLUMN PredictedSales2025  	FORMAT '$999,999.99' 	HEADING "2025     | PREDICTED SALES"
+COLUMN PredictedOrders2025  	FORMAT '99,999' 		HEADING "2025     | PREDICTED ORDERS"
+COLUMN SalesPerOrder 		FORMAT '$99,999.99' 	HEADING "SALES  | PER ORDER"
+BREAK ON stallname SKIP 1 ON cal_year
+
+-- Title
+TTITLE 	CENTER 'Yearly Sales Performance And Prediction For ' &v_stall ' Between 2020 And 2024' - 
+	SKIP 1 - 
+	RIGHT 'Date: ' _DATE -
+	SKIP 1 - 
+	RIGHT 'Page No: ' FORMAT 999 SQL.PNO -
+	SKIP 2 -
+
+COMPUTE AVG LABEL 'Average: '			OF SalesGrowthPerc 	ON stallname
+COMPUTE AVG 			 		OF OrderGrowthPerc 	ON stallname
+COMPUTE SUM LABEL 'GRAND TOTAL: ' 	OF YearlyTotalSales 	ON stallname
+COMPUTE SUM 					OF YearlyTotalOrder 	ON stallname
+
+CREATE OR REPLACE VIEW StallYearlyView AS
+WITH PreviousYear AS (
+    SELECT 
+M.stallname, 
+           	D.cal_year, 
+           	SUM(ITF.linetotal) AS YearlyTotalSales,
+           	COUNT(DISTINCT(ODF.orderid)) AS YearlyTotalOrder,
+           	LAG(SUM(ITF.linetotal)) OVER (PARTITION BY M.stallname ORDER BY D.cal_year) AS PrevYearSales,
+           	LAG(COUNT(DISTINCT(ODF.orderid))) OVER (PARTITION BY M.stallname ORDER BY D.cal_year) AS PrevYearOrders
+    FROM Orders_fact ODF 
+    JOIN Items_fact  ITF ON ODF.orderid = ITF.orderid
+    JOIN Menu_dim    M   ON ITF.menu_key = M.menu_key
+    JOIN Date_dim    D   ON ODF.date_key = D.date_key
+    WHERE D.cal_year BETWEEN 2020 AND 2024
+    GROUP BY M.stallname, D.cal_year
+)
+SELECT 
+stallname, 
+       	cal_year, 
+       	YearlyTotalSales, 
+       	YearlyTotalOrder,
+      	((YearlyTotalSales - PrevYearSales) / PrevYearSales) * 100 AS SalesGrowthPerc,
+       	((YearlyTotalOrder - PrevYearOrders) / PrevYearOrders) * 100 AS OrderGrowthPerc
+FROM PreviousYear;
+
+CREATE OR REPLACE VIEW PredictSales AS
+SELECT  
+SYV.stallname, 
+        	SYV.cal_year,
+        	SYV.YearlyTotalSales, 
+        	SYV.YearlyTotalOrder,
+        	SYV.SalesGrowthPerc, 
+        	SYV.OrderGrowthPerc, 
+        	CASE 
+            	WHEN SYV.cal_year = 2024 THEN 
+                		(SYV.YearlyTotalSales * (1 + (SELECT AVG(SalesGrowthPerc) FROM StallYearlyView WHERE stallname = SYV.stallname) / 100))
+        	END AS PredictedSales2025, 
+        	CASE 
+            	WHEN SYV.cal_year = 2024 THEN 
+                		(SYV.YearlyTotalOrder * (1 + (SELECT AVG(OrderGrowthPerc) FROM StallYearlyView WHERE stallname = SYV.stallname) / 100))
+        	END AS PredictedOrders2025
+FROM StallYearlyView SYV
+ORDER BY SYV.stallname, SYV.cal_year;
+
+SELECT  
+PS.stallname, 
+        	PS.cal_year, 
+        	PS.YearlyTotalSales, 
+        	PS.YearlyTotalOrder,  
+        	PS.SalesGrowthPerc, 
+        	PS.OrderGrowthPerc, 
+        	PS.PredictedSales2025,
+        	PS.PredictedOrders2025,
+        	(PS.PredictedSales2025 / PS.PredictedOrders2025) AS SalesPerOrder
+FROM PredictSales PS
+WHERE PS.stallname = UPPER('&v_stall');
+
+CLEAR COLUMNS
+CLEAR BREAKS
+CLEAR COMPUTES
+TTITLE OFF

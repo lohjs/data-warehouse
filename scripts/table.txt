@@ -1,0 +1,67 @@
+create table date_dim
+(date_key              number           not null,
+ cal_date              date             not null,
+ day_of_week           number(1)        not null,
+ day_number_month      number(2)        not null,
+ cal_month_year        number(2)        not null,
+ cal_year_month        char(7)          not null,
+ cal_quarter           char(2)          not null,
+ cal_year              number(4)        not null,
+ holiday_ind           char(1)          not null,
+ weekday_ind           char(1)          not null,
+ festive_season        varchar(30)      ,
+constraint PK_date_key primary key(date_key)
+);
+
+create table customer_dim
+(customer_key 	number          not null,
+ customerID     number          not null,
+ customerName 	varchar(30)     not null,
+ dob            date            not null,
+ monthlyIncome	varchar(20)     not null,
+ state 		varchar(25)     not null,
+ city 		varchar(25)     not null,
+ postalCode     char(5)         not null,
+ startDate      date            not null,
+ endDate        date            not null,
+ currentFlag    number(1)       not null,
+constraint PK_CustomerKey primary key(customer_key)
+);
+
+create table menu_dim
+(menu_key       number     not null,
+ menuID		varchar(6)	not null,
+ itemName	varchar(40)	not null,
+ category	varchar(20)	not null,
+ stallName	varchar(25)	not null,
+ constraint PK_menu_key primary key(menu_key)
+);
+
+CREATE TABLE Items_Fact (
+ date_key           number        not null,
+ customer_key       number        not null,
+ menu_key           number        not null,
+ orderID            number        not null,
+ unitPrice          number(5,2)   not null,
+ quantity           number(3)     not null,
+ lineTotal          number(10,2)  not null,
+ constraint PK_Items_Fact_Key primary key(date_key, customer_key, menu_key, orderID),
+ constraint FK_date_key foreign key (date_key) references date_dim,
+ constraint FK_customer_key foreign key (customer_key) references customer_dim,
+ constraint FK_menu_key foreign key (menu_key) references menu_dim
+);
+
+CREATE TABLE Orders_Fact (
+ date_key           number        not null,
+ customer_key       number        not null,
+ orderID            number        not null,
+ deliveryFee        number(4,2)   not null,
+ companyName        varchar(70)   not null,
+ status             varchar(10)   not null,
+ orderTime          varchar(5)    not null,
+ orderAmount        number(12,2)  not null,
+ constraint PK_Orders_Fact_Key primary key(date_key, customer_key, orderID),
+ constraint FK_date2_key foreign key (date_key) references date_dim,
+ constraint FK_customer2_key foreign key (customer_key) references customer_dim
+);
+

@@ -1,0 +1,7 @@
+UPDATE customer_dim
+SET endDate = SYSDATE, currentFlag = 0
+WHERE customerID = 112800 
+AND currentFlag = 1; 
+
+INSERT INTO customer_dim (customer_key, customerID, customerName, dob, monthlyIncome, state, city, postalCode, startDate, endDate, currentFlag)
+VALUES (customer_dim_seq.nextval, 112800, 'LORENA PURCHALL', TO_DATE('14/01/1996', 'dd/mm/yyyy'), '7001 - 9000', 'KELANTAN', 'KOTA BHARU', '15550', SYSDATE, TO_DATE('31/12/9999', 'dd/mm/yyyy'), 1);
